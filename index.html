@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HTC Sense Hava Durumu</title>
+<style>
+:root{--fg:#fff;--chip:rgba(0,0,0,.28);box-sizing:border-box}
+html,body{height:100%;margin:0;background:#1d2630;overflow:hidden;font-family:"Roboto","Helvetica Neue",Arial,sans-serif;color:var(--fg);-webkit-tap-highlight-color:transparent}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+#ui{position:fixed;inset:0;padding:calc(env(safe-area-inset-top,0px) + 14px) 18px calc(env(safe-area-inset-bottom,0px) + 14px);pointer-events:none;display:flex;flex-direction:column}
+#chips{display:flex;gap:8px;overflow-x:auto;pointer-events:auto;scrollbar-width:none}
+#chips button{flex:none;border:0;border-radius:20px;padding:8px 14px;background:var(--chip);color:var(--fg);font-size:14px;backdrop-filter:blur(6px)}
+#chips button.on{background:rgba(255,255,255,.88);color:#111}
+#clock{margin-top:9vh;text-align:center;text-shadow:0 2px 14px rgba(0,0,0,.35)}
+#time{display:flex;justify-content:center;gap:6px;align-items:center;perspective:400px}
+.fc{position:relative;width:clamp(48px,16vw,84px);height:clamp(70px,23vw,120px);border-radius:8px;background:linear-gradient(#3b3e43 50%,#2a2c30 50%);font-size:clamp(52px,17vw,92px);font-weight:300;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(0,0,0,.45);color:#f2f2f2;overflow:hidden}
+.fc::after{content:"";position:absolute;left:0;right:0;top:50%;height:2px;background:rgba(0,0,0,.6)}
+.fc.f{animation:fl .5s ease-out}
+@keyframes fl{0%{transform:rotateX(90deg)}100%{transform:rotateX(0)}}
+.co{font-size:clamp(40px,12vw,64px);font-weight:300;opacity:.9}
+#date{font-size:17px;opacity:.9;margin-top:4px}
+#wx{margin-top:22px;display:flex;justify-content:center;align-items:baseline;gap:14px}
+#temp{font-size:56px;font-weight:200}
+#cond{font-size:20px}
+#city{font-size:14px;opacity:.8;margin-top:2px}
+#hint{margin-top:auto;text-align:center;font-size:12px;opacity:.6;padding-bottom:6px}
+</style></head><body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div id="clock">
+    <div id="time"></div><div id="date"></div>
+    <div id="wx"><span id="temp">14°</span><span id="cond">Yağmurlu</span></div>
+    <div id="city">İstanbul</div>
+  </div>
+  <div id="hint">Silecekleri çalıştırmak için ekrana dokun</div>
+</div>
+<script>
+const c=document.getElementById('c'),x=c.getContext('2d');
+let W,H;
+function rs(){const d=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;c.width=W*d;c.height=H*d;x.setTransform(d,0,0,d,0,0)}
+const f=document.createElement('canvas'),fx=f.getContext('2d');
+function fogFill(a){fx.globalCompositeOperation='source-over';fx.fillStyle=`rgba(205,218,232,${a})`;fx.fillRect(0,0,f.width,f.height)}
+function rf(){f.width=W;f.height=H;fogFill(.5)}
+rs();rf();addEventListener('resize',()=>{rs();rf()});
+
+const M={rain:['Yağmur','Yağmurlu',14,['#46586a','#1b232d']],
+storm:['Fırtına','Fırtınalı',11,['#2b3040','#0d1016']],
+cloud:['Bulutlu','Bulutlu',17,['#7d95ab','#c9d6e0']],
+sun:['Güneş','Güneşli',26,['#3f9de8','#c3e6fb']],
+snow:['Kar','Karlı',-1,['#8da1b6','#e2e9f0']]};
+let mode='rain';
+function setMode(k,t){mode=k;drops.length=0;fx.clearRect(0,0,f.width,f.height);if(k!=='sun')fogFill(k==='rain'||k==='storm'?.5:.25);
+cond.textContent=M[k][1];temp.textContent=(t!=null?t:M[k][2])+'°';
+if(k==='rain'||k==='storm')wipe(2)}
+
+const R=(a,b)=>a+Math.random()*(b-a);
+const clouds=Array.from({length:7},()=>({x:R(-100,innerWidth),y:R(0,.45)*innerHeight*1+R(0,60),s:R(.8,1.8),v:R(.1,.4)}));
+const streaks=Array.from({length:130},()=>({x:R(0,1),y:R(0,1),l:R(10,26),v:R(14,24)}));
+const flakes=Array.from({length:90},()=>({x:R(0,1),y:R(0,1),r:R(1.2,3.5),v:R(.6,1.8),p:R(0,6)}));
+const drops=[];let flash=0,sunA=0,fr=0;
+
+/* silecek */
+const w={on:false,t0:0,n:1,th:0.04,prev:0.04};
+const REST=0.04,MAXA=2.95,DUR=1100;
+function wipe(n){w.on=true;w.t0=performance.now();w.n=n}
+c.addEventListener('pointerdown',()=>wipe(1));
+const piv=()=>[[W*.27,H+14],[W*.73,H+14]],LEN=()=>H*.9;
+
+function stepWiper(now){
+  w.prev=w.th;
+  if(!w.on){w.th=REST;return}
+  const p=(now-w.t0)/DUR;
+  if(p>=w.n){w.on=false;w.th=REST}
+  else w.th=REST+(MAXA-REST)*(.5-.5*Math.cos(2*Math.PI*p));
+  const lo=Math.min(w.prev,w.th)-.04,hi=Math.max(w.prev,w.th)+.04,L=LEN();
+  fx.globalCompositeOperation='destination-out';fx.fillStyle='#000';
+  for(const [px,py] of piv()){fx.beginPath();fx.moveTo(px,py);fx.arc(px,py,L,-hi,-lo);fx.closePath();fx.fill()}
+  for(let i=drops.length-1;i>=0;i--){const d=drops[i];
+    for(const [px,py] of piv()){
+      const dx=d.x-px,dy=py-d.y,dist=Math.hypot(dx,dy);
+      if(dist<L){const ph=Math.atan2(dy,dx);if(ph>=lo&&ph<=hi){drops.splice(i,1);break}}
+    }}
+}
+function drawWiper(){
+  if(w.th<=REST+.01&&!w.on)return;
+  const L=LEN();
+  for(const [px,py] of piv()){
+    x.save();x.translate(px,py);x.rotate(-w.th);
+    x.lineCap='round';
+    x.strokeStyle='#0c0c0c';x.lineWidth=5;x.beginPath();x.moveTo(0,0);x.lineTo(L,0);x.stroke();
+    x.strokeStyle='rgba(0,0,0,.92)';x.lineWidth=9;x.beginPath();x.moveTo(L*.22,-3);x.lineTo(L*.97,-3);x.stroke();
+    x.restore();
+  }
+}
+
+function cloud(cl,dark){
+  const a=dark?.5:.55;
+  for(let i=0;i<5;i++){
+    const cx=cl.x+i*38*cl.s,cy=cl.y+Math.sin(i*1.7)*14*cl.s,r=(46+(i%3)*12)*cl.s;
+    const g=x.createRadialGradient(cx,cy,0,cx,cy,r);
+    const col=dark?'40,48,58':'255,255,255';
+    g.addColorStop(0,`rgba(${col},${a})`);g.addColorStop(1,`rgba(${col},0)`);
+    x.fillStyle=g;x.fillRect(cx-r,cy-r,r*2,r*2);
+  }
+}
+
+function frame(now){
+  const [t,b]=M[mode][3];
+  const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,t);g.addColorStop(1,b);
+  x.fillStyle=g;x.fillRect(0,0,W,H);
+
+  if(mode==='sun'){
+    sunA+=.004;const sx=W*.8,sy=H*.14;
+    const gg=x.createRadialGradient(sx,sy,0,sx,sy,W*.7);
+    gg.addColorStop(0,'rgba(255,248,200,.95)');gg.addColorStop(.15,'rgba(255,230,140,.5)');gg.addColorStop(1,'rgba(255,230,140,0)');
+    x.fillStyle=gg;x.fillRect(0,0,W,H);
+    x.save();x.translate(sx,sy);x.rotate(sunA);
+    for(let i=0;i<12;i++){x.rotate(Math.PI/6);const rg=x.createLinearGradient(0,0,W*.8,0);
+      rg.addColorStop(0,'rgba(255,255,220,.22)');rg.addColorStop(1,'rgba(255,255,220,0)');
+      x.fillStyle=rg;x.beginPath();x.moveTo(0,-6);x.lineTo(W*.8,-26);x.lineTo(W*.8,26);x.lineTo(0,6);x.fill()}
+    x.restore();
+  }
+
+  const dark=mode==='rain'||mode==='storm';
+  if(mode!=='sun'||true){const n=mode==='sun'?2:clouds.length;
+    for(let i=0;i<n;i++){const cl=clouds[i];cl.x+=cl.v;if(cl.x>W+120)cl.x=-300*cl.s;cloud(cl,dark)}}
+
+  if(dark){
+    x.strokeStyle='rgba(200,220,240,.35)';x.lineWidth=1.2;x.beginPath();
+    for(const s of streaks){s.y+=s.v/H;s.x-=.6/W*s.v*.3;if(s.y>1){s.y=-.05;s.x=Math.random()}
+      const px=s.x*W,py=s.y*H;x.moveTo(px,py);x.lineTo(px-s.l*.18,py+s.l)}
+    x.stroke();
+  }
+  if(mode==='snow'){
+    x.fillStyle='rgba(255,255,255,.9)';
+    for(const f of flakes){f.y+=f.v/H;f.p+=.03;if(f.y>1){f.y=-.02;f.x=Math.random()}
+      x.beginPath();x.arc(f.x*W+Math.sin(f.p)*14,f.y*H,f.r,0,6.3);x.fill()}
+  }
+  if(mode==='storm'){
+    if(Math.random()<.006)flash=1;
+    if(flash>0){x.fillStyle=`rgba(220,230,255,${flash*.5})`;x.fillRect(0,0,W,H);flash-=.06}
+  }
+
+  fr++;if(fr%14===0&&mode!=='sun')fogFill(dark?.03:.012);
+  x.globalAlpha=.4;x.drawImage(f,0,0);x.globalAlpha=1;
+  if(dark&&!w.on&&now-w.t0>12000)wipe(1);
+  /* cam damlaları */
+  const rate=dark?(mode==='storm'?.9:.55):mode==='snow'?.04:mode==='cloud'?.03:0;
+  if(Math.random()<rate&&drops.length<230)drops.push({x:R(0,W),y:R(0,H*.85),r:R(2,7),vy:0,mv:Math.random()<.35});
+  for(const d of drops){
+    if(d.mv||d.r>6){d.vy+=.03*d.r/6;d.vy*=.985;d.y+=d.vy;if(Math.random()<.02)d.vy=0;d.r-=.0015;if(d.vy>.5&&Math.random()<.12&&drops.length<260)drops.push({x:d.x+R(-1,1),y:d.y-d.r,r:R(.8,1.6),vy:0})}
+    d.life=(d.life||0)+1;
+    if(d.vy>.4){x.strokeStyle='rgba(255,255,255,.12)';x.lineWidth=d.r*.6;x.beginPath();x.moveTo(d.x,d.y-d.vy*10);x.lineTo(d.x,d.y);x.stroke()}
+    const gr=x.createRadialGradient(d.x-d.r*.3,d.y-d.r*.3,0,d.x,d.y,d.r);
+    gr.addColorStop(0,'rgba(255,255,255,.55)');gr.addColorStop(.6,'rgba(190,210,230,.16)');gr.addColorStop(1,'rgba(20,30,45,.35)');
+    x.fillStyle=gr;x.beginPath();x.arc(d.x,d.y,d.r,0,6.3);x.fill();
+    x.fillStyle='rgba(255,255,255,.7)';x.beginPath();x.arc(d.x-d.r*.35,d.y-d.r*.4,d.r*.22,0,6.3);x.fill();
+  }
+  for(let i=drops.length-1;i>=0;i--)if(drops[i].y>H+10||drops[i].r<1)drops.splice(i,1);
+
+  stepWiper(now);drawWiper();
+  requestAnimationFrame(frame);
+}
+
+/* saat */
+const tm=document.getElementById('time'),dt=document.getElementById('date');
+function tick(){const n=new Date();
+const s=n.toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit',hour12:false});if(!tm.children.length)for(const ch of s){const e=document.createElement('span');e.className=ch===':'?'co':'fc';tm.appendChild(e)}[...s].forEach((ch,i)=>{const e=tm.children[i];if(e&&e.textContent!==ch){e.textContent=ch;if(e.classList.contains('fc')){e.classList.remove('f');void e.offsetWidth;e.classList.add('f')}}});
+dt.textContent=n.toLocaleDateString('tr-TR',{weekday:'long',day:'numeric',month:'long'})}
+tick();setInterval(tick,1000);
+
+/* otomatik hava durumu (Open-Meteo) */
+function code2mode(c){if(c>=95)return'storm';if((c>=71&&c<=77)||c===85||c===86)return'snow';if(c>=51)return'rain';if(c>=2)return'cloud';return'sun'}
+async function loadWx(lat,lon){
+  const r=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`);
+  const j=await r.json();
+  document.getElementById('city').textContent='Bulunduğun konum';
+  setMode(code2mode(j.current.weather_code),Math.round(j.current.temperature_2m));wipe(2)}
+let di=0;const seq=['rain','sun','cloud','storm','snow'];
+function demo(){if(window.__demo)return;window.__demo=1;const step=()=>setMode(seq[di++%5]);step();setInterval(step,15000)}
+function getWx(){const go=(la,lo)=>loadWx(la,lo).catch(demo);
+  if(navigator.geolocation)navigator.geolocation.getCurrentPosition(p=>go(p.coords.latitude,p.coords.longitude),()=>go(41.01,28.98),{timeout:6000});
+  else go(41.01,28.98)}
+setMode('cloud');
+setTimeout(()=>wipe(2),500);
+getWx();setInterval(getWx,1800000);
+requestAnimationFrame(frame);
+</script></body></html>
